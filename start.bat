@@ -8,13 +8,18 @@ echo  |   Ultimate Solutions - Altmt      |
 echo  +==================================+
 echo.
 
-set PYTHON=python
-where python >nul 2>&1 || set PYTHON=python3
+set PYTHON=py
+where py >nul 2>&1 || set PYTHON=python
 
 cd /d "%~dp0"
-%PYTHON% -c "import flask,flask_cors" 2>nul || (
+set EMP_DB_HOST=localhost
+set EMP_DB_PORT=3306
+set EMP_DB_USER=root
+set EMP_DB_PASSWORD=
+set EMP_DB_NAME=emp_system
+%PYTHON% -c "import flask,flask_cors,mysql.connector" 2>nul || (
     echo Installing required libraries...
-    %PYTHON% -m pip install flask flask-cors --quiet
+    %PYTHON% -m pip install flask flask-cors mysql-connector-python --quiet
 )
 
 echo  Starting server on: http://localhost:5000
