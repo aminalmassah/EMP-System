@@ -1,81 +1,25 @@
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
-import os, hashlib, json as _json
-
-try:
-    import mysql.connector
-except Exception:
-    mysql = None
-
-
-class MySQLRow(dict):
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return tuple(self.values())[key]
-        return super().__getitem__(key)
-
-
-class MySQLResult:
-    def __init__(self, cursor):
-        self.cursor = cursor
-
-    def fetchone(self):
-        row = self.cursor.fetchone()
-        return MySQLRow(row) if row is not None else None
-
-    def fetchall(self):
-        return [MySQLRow(row) for row in self.cursor.fetchall()]
-
-
-class MySQLConnection:
-    def __init__(self, connection):
-        self.connection = connection
-
-    def execute(self, query, params=()):
-        query = query.replace('INSERT OR IGNORE', 'INSERT IGNORE')
-        query = query.replace("datetime('now','localtime')", 'CURRENT_TIMESTAMP')
-        query = query.replace('?', '%s')
-        cursor = self.connection.cursor(dictionary=True)
-        cursor.execute(query, params)
-        return MySQLResult(cursor)
-
-    def commit(self):
-        self.connection.commit()
-
-    def close(self):
-        self.connection.close()
-
+import sqlite3, os, hashlib, shutil, json as _json
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend')
+DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data')
+os.makedirs(DATA_DIR, exist_ok=True)
 
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
 CORS(app)
-
-USE_MYSQL = True
-MYSQL_HOST = os.getenv('EMP_DB_HOST', 'localhost')
-MYSQL_PORT = int(os.getenv('EMP_DB_PORT', '3306'))
-MYSQL_USER = os.getenv('EMP_DB_USER', 'root')
-MYSQL_PASSWORD = os.getenv('EMP_DB_PASSWORD', '')
-MYSQL_DATABASE = os.getenv('EMP_DB_NAME', 'emp_system')
 
 @app.route('/')
 def index():
     return send_from_directory(FRONTEND_DIR, 'index.html')
 
+DB_PATH = os.path.join(DATA_DIR, 'database.db')
+
 def get_db():
-    if mysql is None:
-        raise RuntimeError('mysql-connector-python is not installed.')
-    connection = mysql.connector.connect(
-        host=MYSQL_HOST,
-        port=MYSQL_PORT,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE,
-        autocommit=True,
-        charset='utf8mb4',
-        use_pure=True,
-    )
-    return MySQLConnection(connection)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 def next_code(table, prefix, col='code'):
     conn = get_db()
@@ -87,10 +31,6 @@ def next_code(table, prefix, col='code'):
     return base
 
 def init_db():
-    if USE_MYSQL:
-        conn = get_db()
-        conn.close()
-        return
     conn = get_db(); c = conn.cursor()
 
     # ===== التأهيل الشامل =====
@@ -356,90 +296,6 @@ def init_db():
     for _tbl in ['exe_assignments','exe_plans','exe_execution_ops','exe_training_ops','exe_activities']:
         try: c.execute(f"ALTER TABLE {_tbl} ADD COLUMN code TEXT")
         except: pass
-
-    if c.execute("SELECT COUNT(*) FROM systems").fetchone()[0] == 0:
-        default_systems = [
-            ('الأونكس برو', 'أونكس برو', 'أساسي', 1),
-            ('نقاط البيع', 'أونكس برو', 'أساسي', 2),
-            ('التوزيع', 'أونكس برو', 'أساسي', 3),
-            ('الموارد البشرية', 'أونكس برو', 'أساسي', 4),
-            ('الإنتاج', 'أونكس برو', 'أساسي', 5),
-            ('المشاريع', 'أونكس برو', 'أساسي', 6),
-            ('الورش', 'أونكس برو', 'أساسي', 7),
-            ('المطاعم', 'أونكس برو', 'أساسي', 8),
-            ('المستشفيات', 'أونكس برو', 'أساسي', 9),
-            ('صيانة الأصول', 'أونكس برو', 'أساسي', 10),
-            ('الأسطول', 'أونكس برو', 'أساسي', 11),
-            ('الأصول', 'أونكس برو', 'أساسي', 12),
-            ('الموارد البشرية متكامل', 'متكامل', 'متكامل', 13),
-            ('المستشفيات متكامل', 'متكامل', 'متكامل', 14),
-            ('الفنادق متكامل', 'متكامل', 'متكامل', 15),
-            ('الذهب متكامل', 'متكامل', 'متكامل', 16),
-            ('المطاعم متكامل', 'متكامل', 'متكامل', 17),
-            ('النقل والطرود متكامل', 'متكامل', 'متكامل', 18),
-        ]
-        for name, erp_type, sys_category, sort_order in default_systems:
-            c.execute("INSERT INTO systems (name,erp_type,sys_category,sort_order,active) VALUES (?,?,?,?,1)",
-                      (name, erp_type, sys_category, sort_order))
-
-    if c.execute("SELECT COUNT(*) FROM employees").fetchone()[0] == 0:
-        default_employees = [
-            ('محمود الشريف', 'مدير', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 1),
-            ('نشوان الشميري', 'مدرب', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-مدرب', 2),
-            ('هيثم عوض', 'مدرب', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-مدرب', 3),
-            ('بسام الفقيه', 'مدرب', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-مدرب', 4),
-            ('محفوظ حسان', 'مستقل', 'جدة', 'مستقل', 5),
-            ('عمر الصلوي', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 6),
-            ('محمد سعيد', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 7),
-            ('شهد الشريف', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 8),
-            ('ترفة عبدالعزيز', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 9),
-            ('وعد الغامدي', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 10),
-            ('رفعت سمير', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 11),
-            ('طه عادل', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 12),
-            ('عدنان اليوسفي', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 13),
-            ('صالح بالحارث', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 14),
-            ('فائزة هتان', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 15),
-            ('حمد بلحارث', 'مدرب', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-مدرب', 16),
-            ('أحمد محمد عبد الله', 'مدرب', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-مدرب', 17),
-            ('محمد المطيري', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 18),
-            ('مصطفى شوشة', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 19),
-            ('محمد الحسامي', 'منفذ', 'الرياض', 'شركة الحلول النهائية لاعمال الحاسب الالي-منفذ', 20),
-        ]
-        for name, job_title, branch, executor_type, sort_order in default_employees:
-            c.execute("INSERT INTO employees (name,job_title,branch,executor_type,sort_order,active) VALUES (?,?,?,?,?,1)",
-                      (name, job_title, branch, executor_type, sort_order))
-
-    if c.execute("SELECT COUNT(*) FROM qualifications").fetchone()[0] == 0:
-        system_rows = c.execute("SELECT id, name FROM systems WHERE active=1 ORDER BY id").fetchall()
-        employee_rows = c.execute("SELECT id, name FROM employees WHERE active=1 ORDER BY id").fetchall()
-        default_levels = {
-            'محمود الشريف': [('الأونكس برو', 2), ('نقاط البيع', 2), ('التوزيع', 2)],
-            'نشوان الشميري': [('الأونكس برو', 1), ('المستشفيات', 2)],
-            'هيثم عوض': [('المستشفيات', 2), ('الفنادق متكامل', 2)],
-            'بسام الفقيه': [('الموارد البشرية', 2), ('الإنتاج', 2)],
-            'عمر الصلوي': [('المشاريع', 1), ('الأصول', 1)],
-            'محمد سعيد': [('نقاط البيع', 1)],
-            'شهد الشريف': [('التوزيع', 1), ('الموارد البشرية', 1)],
-            'ترفة عبدالعزيز': [('المطاعم', 1), ('المستشفيات', 1)],
-            'وعد الغامدي': [('الأصول', 1), ('الأسطول', 1)],
-            'رفعت سمير': [('الموارد البشرية', 1)],
-            'طه عادل': [('الأونكس برو', 1)],
-            'عدنان اليوسفي': [('الأونكس برو', 1)],
-            'صالح بالحارث': [('الأونكس برو', 1)],
-            'فائزة هتان': [('الأونكس برو', 1)],
-            'حمد بلحارث': [('المطاعم متكامل', 2)],
-            'أحمد محمد عبد الله': [('الذهب متكامل', 2), ('الموارد البشرية متكامل', 2)],
-            'محمد المطيري': [('المطاعم متكامل', 1)],
-            'مصطفى شوشة': [('الفنادق متكامل', 1)],
-            'محمد الحسامي': [('المستشفيات متكامل', 1)],
-        }
-        for emp in employee_rows:
-            emp_name = emp['name']
-            for sys_name, level in default_levels.get(emp_name, []):
-                sys_row = next((s for s in system_rows if s['name'] == sys_name), None)
-                if sys_row:
-                    c.execute("INSERT OR IGNORE INTO qualifications (employee_id,system_id,level_2025,level_2026_expected,level_2026_actual) VALUES (?,?,?,?,?)",
-                              (emp['id'], sys_row['id'], level, level, level))
 
     # المستخدمون الافتراضيون
     admin_pass = hashlib.md5('admin123'.encode()).hexdigest()
@@ -1050,6 +906,22 @@ def exe_reports_summary():
             'assignments_count':len(asgns)})
     conn.close(); return jsonify(result)
 
+# ===== النسخة الاحتياطية =====
+@app.route('/api/backup/download', methods=['GET'])
+def download_backup():
+    backup = DB_PATH.replace('database.db','database_backup.db')
+    shutil.copy2(DB_PATH, backup)
+    return send_file(backup, as_attachment=True, download_name='database_backup.db')
+
+@app.route('/api/backup/restore', methods=['POST'])
+def restore_backup():
+    if 'file' not in request.files: return jsonify({'success':False,'message':'لا يوجد ملف'}), 400
+    f = request.files['file']
+    if not f.filename.endswith('.db'): return jsonify({'success':False,'message':'يجب رفع ملف .db'}), 400
+    f.save(DB_PATH); return jsonify({'success':True,'message':'تم الاستعادة بنجاح'})
+
+
+
 # --- شريط الواجهة الرئيسية (Login Ticker) ---
 @app.route('/api/ticker', methods=['GET'])
 def get_ticker():
@@ -1256,5 +1128,5 @@ def toggle_schedule_attendee(att_id):
 if __name__ == '__main__':
     init_db()
     print("\n✅ التطبيق يعمل على: http://localhost:5000")
-    print(f"✅ البيانات محفوظة في MySQL: {MYSQL_DATABASE}\n")
+    print("✅ البيانات محفوظة في مجلد data\n")
     app.run(host='0.0.0.0', port=5000, debug=False)
