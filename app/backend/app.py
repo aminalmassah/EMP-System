@@ -3,7 +3,7 @@ from flask_cors import CORS
 import sqlite3, os, hashlib, shutil, json as _json
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend')
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data')
+DATA_DIR = os.getenv('EMP_DATA_DIR') or os.path.join(os.path.dirname(__file__), '..', '..', 'data')
 os.makedirs(DATA_DIR, exist_ok=True)
 
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
@@ -1125,8 +1125,11 @@ def toggle_schedule_attendee(att_id):
     conn.close()
     return jsonify({'success':True})
 
+# Create/upgrade tables at import time so gunicorn (Render) also initialises the DB.
+# Safe to run repeatedly: uses CREATE TABLE IF NOT EXISTS.
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     print("\n✅ التطبيق يعمل على: http://localhost:5000")
-    print("✅ البيانات محفوظة في مجلد data\n")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    print("✅ البيانات محفوظة في:", DATA_DIR, "\n")
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=False)
